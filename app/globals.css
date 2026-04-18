@@ -1,11 +1,39 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ece7d8;
-  --surface: #faf7ef;
-  --foreground: #0a0a0a;
-  --muted: #6b6b6b;
-  --border: #0a0a0a;
+  --background: #e4decb;
+  --surface: #ede6d2;
+  --foreground: #1a1a1a;
+  --muted: #706b5c;
+  --border: #1a1a1a;
+  --shadow: #1a1a1a;
+  --invert-bg: #1a1a1a;
+  --invert-fg: #ede6d2;
+  --placeholder: #9d978a;
+  --divider: rgba(26, 26, 26, 0.2);
+  --danger: #a52121;
+  --font-serif: "Times New Roman", "Times", Georgia, serif;
+  color-scheme: light;
+}
+
+.serif {
+  font-family: var(--font-serif);
+  letter-spacing: normal;
+}
+
+html.dark {
+  --background: #0d0d0d;
+  --surface: #1a1a1a;
+  --foreground: #ece7d8;
+  --muted: #9a9485;
+  --border: #ece7d8;
+  --shadow: #000000;
+  --invert-bg: #ece7d8;
+  --invert-fg: #0a0a0a;
+  --placeholder: #5a5548;
+  --divider: rgba(236, 231, 216, 0.2);
+  --danger: #fca5a5;
+  color-scheme: dark;
 }
 
 @theme inline {
@@ -35,5 +63,5 @@ button {
 
 input::placeholder,
 textarea::placeholder {
-  color: #a39e8f;
+  color: var(--placeholder);
 }

@@ -93,7 +93,11 @@ export async function POST(req: Request) {
     );
   }
 
-  let body: { url?: string; image?: string } = {};
+  let body: {
+    url?: string;
+    image?: string;
+    file?: { data: string; mediaType: string; name?: string };
+  } = {};
   try {
     body = await req.json();
   } catch {
@@ -102,9 +106,10 @@ export async function POST(req: Request) {
 
   const url = body.url?.trim();
   const image = body.image?.trim();
-  if (!url && !image) {
+  const file = body.file;
+  if (!url && !image && !file) {
     return NextResponse.json(
-      { error: "Provide either 'url' or 'image'" },
+      { error: "Provide 'url', 'image', or 'file'" },
       { status: 400 },
     );
   }
@@ -113,6 +118,12 @@ export async function POST(req: Request) {
     let userContent: Array<
       | { type: "text"; text: string }
       | { type: "image"; image: string | URL }
+      | {
+          type: "file";
+          mediaType: string;
+          data: string | URL;
+          filename?: string;
+        }
     >;
 
     if (image) {
@@ -123,6 +134,54 @@ export async function POST(req: Request) {
         },
         { type: "image", image },
       ];
+    } else if (file) {
+      const media = file.mediaType || "";
+      if (media.startsWith("image/")) {
+        userContent = [
+          {
+            type: "text",
+            text: "Identify this part and extract naming fields per PI CAD spec.",
+          },
+          { type: "image", image: file.data },
+        ];
+      } else if (media === "application/pdf") {
+        userContent = [
+          {
+            type: "text",
+            text: `Identify this part from the attached PDF${file.name ? ` (${file.name})` : ""} and extract naming fields per PI CAD spec.`,
+          },
+          {
+            type: "file",
+            mediaType: "application/pdf",
+            data: file.data,
+            filename: file.name,
+          },
+        ];
+      } else if (media.startsWith("text/") || media === "application/json") {
+        const match = file.data.match(/^data:[^;,]+(;base64)?,(.*)$/);
+        let text = "";
+        if (match) {
+          const isB64 = Boolean(match[1]);
+          const payload = match[2];
+          text = isB64
+            ? Buffer.from(payload, "base64").toString("utf8")
+            : decodeURIComponent(payload);
+        } else {
+          text = file.data;
+        }
+        const snippet = text.slice(0, 12000);
+        userContent = [
+          {
+            type: "text",
+            text: `Identify this part from the attached text file${file.name ? ` (${file.name})` : ""} and extract naming fields per PI CAD spec.\n\nFILE CONTENT:\n${snippet}`,
+          },
+        ];
+      } else {
+        return NextResponse.json(
+          { error: `Unsupported file type: ${media || "unknown"}` },
+          { status: 400 },
+        );
+      }
     } else {
       const pageText = await fetchPageText(url!);
       userContent = [

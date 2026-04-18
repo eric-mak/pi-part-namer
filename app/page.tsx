@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CATEGORIES,
   SERIES_OPTIONS,
@@ -42,17 +42,43 @@ export default function Home() {
     for (const c of CATEGORIES) init[c.id] = buildInitialValues(c);
     return init;
   });
+  const [touched, setTouched] = useState<Record<string, Set<string>>>(() => {
+    const t: Record<string, Set<string>> = {};
+    for (const c of CATEGORIES) t[c.id] = new Set();
+    return t;
+  });
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [series, setSeries] = useState("2");
   const [ppnNumber, setPpnNumber] = useState("");
   const [dash, setDash] = useState("");
   const [revision, setRevision] = useState("R1");
   const [copied, setCopied] = useState<string | null>(null);
 
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+  useEffect(() => {
+    setTheme(
+      document.documentElement.classList.contains("dark") ? "dark" : "light",
+    );
+  }, []);
+  const toggleTheme = () => {
+    setTheme((prev) => {
+      const next = prev === "light" ? "dark" : "light";
+      document.documentElement.classList.toggle("dark", next === "dark");
+      try {
+        localStorage.setItem("theme", next);
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
+
   const [parseUrl, setParseUrl] = useState("");
   const [parsing, setParsing] = useState(false);
   const [parseError, setParseError] = useState<string | null>(null);
   const [parseNote, setParseNote] = useState<string | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [fileLabel, setFileLabel] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const applyParseResult = (result: {
@@ -64,14 +90,17 @@ export default function Home() {
     if (!cat) throw new Error(`Unknown category ${result.categoryId}`);
     const base = buildInitialValues(cat);
     const merged: FormValues = { ...base };
+    const incomingKeys = new Set<string>();
     for (const f of cat.fields) {
       const incoming = result.values[f.key];
       if (incoming === undefined) continue;
+      incomingKeys.add(f.key);
       if (f.type === "checkbox") merged[f.key] = Boolean(incoming);
       else merged[f.key] = typeof incoming === "string" ? incoming : "";
     }
     setCategoryId(cat.id);
     setAllValues((prev) => ({ ...prev, [cat.id]: merged }));
+    setTouched((prev) => ({ ...prev, [cat.id]: incomingKeys }));
     setParseNote(result.reasoning ?? null);
   };
 
@@ -96,7 +125,7 @@ export default function Home() {
     }
   };
 
-  const handleParseImage = async (file: File) => {
+  const handleParseFile = async (file: File) => {
     setParsing(true);
     setParseError(null);
     setParseNote(null);
@@ -107,11 +136,20 @@ export default function Home() {
         r.onerror = () => reject(r.error);
         r.readAsDataURL(file);
       });
-      setImagePreview(dataUrl);
+      const mediaType = file.type || "application/octet-stream";
+      if (mediaType.startsWith("image/")) {
+        setImagePreview(dataUrl);
+        setFileLabel(null);
+      } else {
+        setImagePreview(null);
+        setFileLabel(`${file.name} · ${mediaType}`);
+      }
       const res = await fetch("/api/parse", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: dataUrl }),
+        body: JSON.stringify({
+          file: { data: dataUrl, mediaType, name: file.name },
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "parse failed");
@@ -124,11 +162,22 @@ export default function Home() {
   };
 
   const values = allValues[category.id];
-  const setValue = (key: string, val: string | boolean) =>
-    setAllValues((prev) => ({
-      ...prev,
-      [category.id]: { ...prev[category.id], [key]: val },
-    }));
+  const setValue = (key: string, val: string | boolean) => {
+    const prevCatValues = allValues[category.id];
+    const nextValues: FormValues = { ...prevCatValues, [key]: val };
+    const userTouched = touched[category.id] ?? new Set<string>();
+    const nextTouched = new Set(userTouched);
+    nextTouched.add(key);
+    if (category.derive) {
+      const derived = category.derive(nextValues);
+      for (const [dk, dv] of Object.entries(derived)) {
+        if (nextTouched.has(dk)) continue;
+        nextValues[dk] = dv;
+      }
+    }
+    setAllValues((prev) => ({ ...prev, [category.id]: nextValues }));
+    setTouched((prev) => ({ ...prev, [category.id]: nextTouched }));
+  };
 
   const name = useMemo(() => category.format(values), [category, values]);
   const ppn = useMemo(
@@ -154,44 +203,47 @@ export default function Home() {
   return (
     <main className="flex-1 flex flex-col">
       <header className="px-8 md:px-16 pt-10 pb-8 flex items-start justify-between gap-6">
-        <div className="flex items-center gap-4">
-          <span
-            aria-label="pi"
-            className="inline-flex items-center justify-center h-12 w-12 md:h-14 md:w-14 rounded-full border-[3px] border-black text-2xl md:text-3xl leading-none font-serif italic pb-0.5 bg-[var(--surface)]"
-          >
-            π
-          </span>
-          <div>
-            <h1 className="text-2xl md:text-3xl font-bold tracking-wide">
-              PI PART NAMER
-            </h1>
-            <p className="text-sm md:text-base text-[var(--muted)] mt-1">
-              generate standard-compliant part names
-            </p>
-          </div>
+        <div className="flex items-end gap-4">
+          <h1 className="serif text-4xl md:text-5xl leading-none">
+            PI Part Namer <span className="italic">(π)</span>
+          </h1>
         </div>
-        <a
-          href="https://www.notion.so/CAD-Standard-Practices-2fd0d8d430d480a4a198e8ea9c28f430"
-          target="_blank"
-          rel="noreferrer"
-          className="hidden md:inline-block text-xs px-4 py-3 bg-[var(--surface)] border border-dashed border-black hover:bg-white transition-colors"
-        >
-          CAD Standard Practices ↗
-        </a>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={toggleTheme}
+            aria-label="toggle theme"
+            className="text-xs px-4 py-3 bg-[var(--surface)] border border-dashed border-[var(--border)] hover:bg-[var(--invert-bg)] hover:text-[var(--invert-fg)] transition-colors"
+          >
+            {theme === "dark" ? "☀ LIGHT" : "☾ DARK"}
+          </button>
+          <a
+            href="https://www.notion.so/CAD-Standard-Practices-2fd0d8d430d480a4a198e8ea9c28f430"
+            target="_blank"
+            rel="noreferrer"
+            className="hidden md:inline-block text-xs px-4 py-3 bg-[var(--surface)] border border-dashed border-[var(--border)] hover:bg-[var(--invert-bg)] hover:text-[var(--invert-fg)] transition-colors"
+          >
+            CAD Standard Practices ↗
+          </a>
+        </div>
       </header>
 
-      <div className="border-t border-black/20" />
+      <p className="px-8 md:px-16 -mt-4 pb-8 text-sm md:text-base text-[var(--muted)] max-w-3xl">
+        generate standard-compliant part names following the PI CAD standard
+        practices.
+      </p>
+
+      <div className="border-t border-[var(--divider)]" />
 
       <section className="flex-1 px-8 md:px-16 py-10 space-y-8">
         {/* PARSE */}
-        <div className="bg-[var(--surface)] border-[3px] border-black shadow-[6px_6px_0_0_#0a0a0a]">
+        <div className="bg-[var(--surface)] border-[3px] border-[var(--border)] shadow-[6px_6px_0_0_var(--shadow)]">
           <div className="px-6 py-6">
             <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 mb-4">
-              <div className="text-xs tracking-widest">
-                PARSE FROM LINK OR IMAGE
+              <div className="serif text-xl">
+                Parse from link or file
               </div>
               <div className="text-[11px] text-[var(--muted)]">
-                auto-fills category + fields using vision + URL scraping
+                auto-fills category + fields from vendor URLs, images, PDFs, or text
               </div>
             </div>
 
@@ -206,7 +258,7 @@ export default function Home() {
                     value={parseUrl}
                     onChange={(e) => setParseUrl(e.target.value)}
                     placeholder="https://www.mcmaster.com/91290A115/"
-                    className="flex-1 bg-[var(--surface)] border border-black px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                    className="flex-1 bg-[var(--surface)] border border-[var(--border)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--border)]"
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && !parsing) handleParseUrl();
                     }}
@@ -214,7 +266,7 @@ export default function Home() {
                   <button
                     onClick={handleParseUrl}
                     disabled={parsing || !parseUrl.trim()}
-                    className="text-xs px-4 py-2 border border-dashed border-black bg-[var(--background)] hover:bg-black hover:text-[var(--surface)] disabled:opacity-40 transition-colors"
+                    className="text-xs px-4 py-2 border border-dashed border-[var(--border)] bg-[var(--background)] hover:bg-[var(--invert-bg)] hover:text-[var(--invert-fg)] disabled:opacity-40 transition-colors"
                   >
                     {parsing ? "PARSING…" : "PARSE URL"}
                   </button>
@@ -223,42 +275,47 @@ export default function Home() {
 
               <div className="md:col-span-4 flex flex-col">
                 <label className="text-xs tracking-widest mb-1.5">
-                  IMAGE / PHOTO
+                  FILE <span className="text-[var(--muted)] font-normal normal-case tracking-normal">(image / pdf / text)</span>
                 </label>
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/*,application/pdf,text/plain,text/csv,text/markdown,application/json,.txt,.md,.csv,.json"
                   className="hidden"
                   onChange={(e) => {
                     const f = e.target.files?.[0];
-                    if (f) handleParseImage(f);
+                    if (f) handleParseFile(f);
                     if (e.target) e.target.value = "";
                   }}
                 />
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   disabled={parsing}
-                  className="text-xs px-4 py-2 border border-dashed border-black bg-[var(--background)] hover:bg-black hover:text-[var(--surface)] disabled:opacity-40 transition-colors"
+                  className="text-xs px-4 py-2 border border-dashed border-[var(--border)] bg-[var(--background)] hover:bg-[var(--invert-bg)] hover:text-[var(--invert-fg)] disabled:opacity-40 transition-colors"
                 >
-                  {parsing ? "PARSING…" : "UPLOAD IMAGE"}
+                  {parsing ? "PARSING…" : "UPLOAD FILE"}
                 </button>
               </div>
             </div>
 
-            {(parseError || parseNote || imagePreview) && (
+            {(parseError || parseNote || imagePreview || fileLabel) && (
               <div className="mt-4 flex flex-wrap items-start gap-4">
                 {imagePreview && (
                   /* eslint-disable-next-line @next/next/no-img-element */
                   <img
                     src={imagePreview}
                     alt="uploaded part"
-                    className="h-20 w-20 object-cover border border-black"
+                    className="h-20 w-20 object-cover border border-[var(--border)]"
                   />
+                )}
+                {!imagePreview && fileLabel && (
+                  <div className="px-3 py-2 text-[11px] border border-[var(--border)] bg-[var(--background)]">
+                    {fileLabel}
+                  </div>
                 )}
                 <div className="flex-1 min-w-[200px] text-[11px] space-y-1">
                   {parseError && (
-                    <div className="text-red-700">ERROR: {parseError}</div>
+                    <div className="text-[var(--danger)]">ERROR: {parseError}</div>
                   )}
                   {parseNote && (
                     <div className="text-[var(--muted)]">
@@ -273,9 +330,9 @@ export default function Home() {
         </div>
 
         {/* CATEGORY picker */}
-        <div className="bg-[var(--surface)] border-[3px] border-black shadow-[6px_6px_0_0_#0a0a0a]">
+        <div className="bg-[var(--surface)] border-[3px] border-[var(--border)] shadow-[6px_6px_0_0_var(--shadow)]">
           <div className="px-6 pt-5 pb-5">
-            <div className="text-xs tracking-widest mb-3">CATEGORY</div>
+            <div className="serif text-xl mb-3">Category</div>
             <div className="flex flex-wrap gap-2">
               {CATEGORIES.map((c) => {
                 const active = c.id === category.id;
@@ -285,8 +342,8 @@ export default function Home() {
                     onClick={() => setCategoryId(c.id)}
                     className={`text-xs px-3 py-2 border transition-colors ${
                       active
-                        ? "bg-black text-[var(--surface)] border-black"
-                        : "bg-[var(--surface)] border-dashed border-black hover:bg-[var(--background)]"
+                        ? "bg-[var(--invert-bg)] text-[var(--invert-fg)] border-[var(--border)]"
+                        : "bg-[var(--surface)] border-dashed border-[var(--border)] hover:bg-[var(--background)]"
                     }`}
                     title={c.group}
                   >
@@ -300,13 +357,16 @@ export default function Home() {
         </div>
 
         {/* FORM */}
-        <div className="bg-[var(--surface)] border-[3px] border-black shadow-[6px_6px_0_0_#0a0a0a]">
+        <div className="bg-[var(--surface)] border-[3px] border-[var(--border)] shadow-[6px_6px_0_0_var(--shadow)]">
           <div className="px-6 py-6">
-            <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 mb-2">
-              <div className="text-xs tracking-widest">
-                {category.group} &mdash; {category.label}
+            <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 mb-2">
+              <div className="serif text-xl">
+                {category.group.charAt(0) + category.group.slice(1).toLowerCase()}{" "}
+                <span className="italic text-[var(--muted)]">
+                  / {category.label.charAt(0) + category.label.slice(1).toLowerCase()}
+                </span>
               </div>
-              <div className="text-xs text-[var(--muted)]">
+              <div className="text-[11px] text-[var(--muted)] tracking-widest">
                 {category.series}
               </div>
             </div>
@@ -314,8 +374,10 @@ export default function Home() {
               FORMAT: {category.description}
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
-              {category.fields.map((f) => {
+            {(() => {
+              const primaryFields = category.fields.filter((f) => !f.advanced);
+              const advancedFields = category.fields.filter((f) => f.advanced);
+              const renderField = (f: Field) => {
                 const colClass = widthClass(f.width);
                 if (f.type === "checkbox") {
                   return (
@@ -327,7 +389,7 @@ export default function Home() {
                         type="checkbox"
                         checked={values[f.key] === true}
                         onChange={(e) => setValue(f.key, e.target.checked)}
-                        className="h-4 w-4 accent-black"
+                        className="h-4 w-4 accent-[var(--foreground)]"
                       />
                       <span>{f.label}</span>
                     </label>
@@ -354,7 +416,7 @@ export default function Home() {
                       <select
                         value={String(values[f.key] ?? "")}
                         onChange={(e) => setValue(f.key, e.target.value)}
-                        className="bg-[var(--surface)] border border-black px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                        className="bg-[var(--surface)] border border-[var(--border)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--border)]"
                       >
                         {(f.options ?? []).map((opt) => (
                           <option key={opt} value={opt}>
@@ -365,6 +427,10 @@ export default function Home() {
                     </div>
                   );
                 }
+                const suggestions = f.suggestions ? f.suggestions(values) : [];
+                const listId = suggestions.length
+                  ? `dl-${category.id}-${f.key}`
+                  : undefined;
                 return (
                   <div key={f.key} className={`${colClass} flex flex-col`}>
                     <div className="flex items-baseline justify-between">
@@ -384,25 +450,62 @@ export default function Home() {
                     </div>
                     <input
                       type="text"
+                      list={listId}
                       value={String(values[f.key] ?? "")}
                       onChange={(e) => setValue(f.key, e.target.value)}
                       placeholder={f.placeholder}
                       spellCheck={false}
                       autoCapitalize="characters"
-                      className="bg-[var(--surface)] border border-black px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                      className="bg-[var(--surface)] border border-[var(--border)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--border)]"
                     />
+                    {listId && (
+                      <datalist id={listId}>
+                        {suggestions.map((s) => (
+                          <option key={s} value={s} />
+                        ))}
+                      </datalist>
+                    )}
                   </div>
                 );
-              })}
-            </div>
+              };
+              return (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
+                    {primaryFields.map(renderField)}
+                  </div>
+                  {advancedFields.length > 0 && (
+                    <div className="mt-5 pt-5 border-t border-dashed border-[var(--divider)]">
+                      <button
+                        onClick={() => setShowAdvanced((v) => !v)}
+                        className="text-[11px] tracking-widest hover:opacity-60 transition-opacity flex items-center gap-2"
+                      >
+                        <span>{showAdvanced ? "▾" : "▸"}</span>
+                        {showAdvanced ? "HIDE" : "SHOW"} ADVANCED
+                        <span className="text-[var(--muted)] normal-case tracking-normal">
+                          ({advancedFields.length} auto-filled · click to override)
+                        </span>
+                      </button>
+                      {showAdvanced && (
+                        <div className="mt-4 grid grid-cols-1 md:grid-cols-6 gap-4">
+                          {advancedFields.map(renderField)}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </div>
         </div>
 
         {/* PPN + REV */}
-        <div className="bg-[var(--surface)] border-[3px] border-black shadow-[6px_6px_0_0_#0a0a0a]">
+        <div className="bg-[var(--surface)] border-[3px] border-[var(--border)] shadow-[6px_6px_0_0_var(--shadow)]">
           <div className="px-6 py-6">
-            <div className="text-xs tracking-widest mb-4">
-              PI PART NUMBER (PPN) &mdash; OPTIONAL
+            <div className="serif text-xl mb-4">
+              Part number <span className="italic">(PPN)</span>
+              <span className="serif text-sm text-[var(--muted)] ml-2">
+                — optional
+              </span>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
               <div className="md:col-span-5 flex flex-col">
@@ -410,7 +513,7 @@ export default function Home() {
                 <select
                   value={series}
                   onChange={(e) => setSeries(e.target.value)}
-                  className="bg-[var(--surface)] border border-black px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                  className="bg-[var(--surface)] border border-[var(--border)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--border)]"
                 >
                   {SERIES_OPTIONS.map((s) => (
                     <option key={s.value} value={s.value}>
@@ -430,7 +533,7 @@ export default function Home() {
                     setPpnNumber(e.target.value.replace(/\D/g, "").slice(0, 6))
                   }
                   placeholder="000399"
-                  className="bg-[var(--surface)] border border-black px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                  className="bg-[var(--surface)] border border-[var(--border)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--border)]"
                 />
               </div>
               <div className="md:col-span-2 flex flex-col">
@@ -447,7 +550,7 @@ export default function Home() {
                     setDash(e.target.value.replace(/\D/g, "").slice(0, 3))
                   }
                   placeholder="001"
-                  className="bg-[var(--surface)] border border-black px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                  className="bg-[var(--surface)] border border-[var(--border)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--border)]"
                 />
               </div>
               <div className="md:col-span-2 flex flex-col">
@@ -459,7 +562,7 @@ export default function Home() {
                   value={revision}
                   onChange={(e) => setRevision(e.target.value.toUpperCase())}
                   placeholder="R1"
-                  className="bg-[var(--surface)] border border-black px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                  className="bg-[var(--surface)] border border-[var(--border)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--border)]"
                 />
               </div>
             </div>
@@ -471,7 +574,7 @@ export default function Home() {
         </div>
 
         {/* OUTPUT */}
-        <div className="bg-black text-[var(--surface)] border-[3px] border-black shadow-[6px_6px_0_0_#0a0a0a]">
+        <div className="bg-[var(--invert-bg)] text-[var(--invert-fg)] border-[3px] border-[var(--border)] shadow-[6px_6px_0_0_var(--shadow)]">
           <div className="px-6 py-6 space-y-5">
             <div>
               <div className="flex items-center justify-between mb-2">
@@ -479,7 +582,7 @@ export default function Home() {
                 <button
                   onClick={() => copy(name, "name")}
                   disabled={!name}
-                  className="text-[10px] px-3 py-1 border border-dashed border-[var(--surface)] hover:bg-[var(--surface)] hover:text-black disabled:opacity-40 transition-colors"
+                  className="text-[10px] px-3 py-1 border border-dashed border-[var(--invert-fg)] hover:bg-[var(--invert-fg)] hover:text-[var(--invert-bg)] disabled:opacity-40 transition-colors"
                 >
                   {copied === "name" ? "COPIED" : "COPY"}
                 </button>
@@ -493,14 +596,14 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-4 border-t border-[var(--surface)]/30">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-4 border-t border-[var(--invert-fg)]/30">
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <div className="text-xs tracking-widest opacity-70">PPN</div>
                   <button
                     onClick={() => copy(ppn, "ppn")}
                     disabled={!ppn}
-                    className="text-[10px] px-3 py-1 border border-dashed border-[var(--surface)] hover:bg-[var(--surface)] hover:text-black disabled:opacity-40 transition-colors"
+                    className="text-[10px] px-3 py-1 border border-dashed border-[var(--invert-fg)] hover:bg-[var(--invert-fg)] hover:text-[var(--invert-bg)] disabled:opacity-40 transition-colors"
                   >
                     {copied === "ppn" ? "COPIED" : "COPY"}
                   </button>
@@ -517,7 +620,7 @@ export default function Home() {
                   <button
                     onClick={() => copy(fileName, "file")}
                     disabled={!fileName}
-                    className="text-[10px] px-3 py-1 border border-dashed border-[var(--surface)] hover:bg-[var(--surface)] hover:text-black disabled:opacity-40 transition-colors"
+                    className="text-[10px] px-3 py-1 border border-dashed border-[var(--invert-fg)] hover:bg-[var(--invert-fg)] hover:text-[var(--invert-bg)] disabled:opacity-40 transition-colors"
                   >
                     {copied === "file" ? "COPIED" : "COPY"}
                   </button>
@@ -532,12 +635,12 @@ export default function Home() {
 
         {/* EXAMPLES */}
         <div>
-          <div className="text-xs tracking-widest mb-3">EXAMPLES</div>
+          <div className="serif text-xl mb-3">Examples</div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             {category.examples.map((ex) => (
               <div
                 key={ex}
-                className="text-xs px-3 py-2 bg-[var(--surface)] border border-dashed border-black/70 break-words"
+                className="text-xs px-3 py-2 bg-[var(--surface)] border border-dashed border-[var(--border)] break-words"
               >
                 {ex}
               </div>
@@ -546,7 +649,7 @@ export default function Home() {
         </div>
       </section>
 
-      <footer className="px-8 md:px-16 py-6 text-[11px] text-[var(--muted)] border-t border-black/20">
+      <footer className="px-8 md:px-16 py-6 text-[11px] text-[var(--muted)] border-t border-[var(--divider)]">
         golden rule: NOUN FIRST, MODIFIERS SECOND &middot; ALL CAPS &middot;
         comma + space separators &middot; leading zero on decimals &middot;
         &ldquo;X&rdquo; means &ldquo;by&rdquo;

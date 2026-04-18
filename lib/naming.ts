@@ -7,8 +7,10 @@ export interface Field {
   placeholder?: string;
   hint?: string;
   options?: string[];
+  suggestions?: (v: Record<string, string | boolean>) => string[];
   defaultValue?: string | boolean;
   optional?: boolean;
+  advanced?: boolean;
   width?: "full" | "half" | "third";
 }
 
@@ -20,8 +22,167 @@ export interface Category {
   series: string;
   fields: Field[];
   format: (v: Record<string, string | boolean>) => string;
+  derive?: (
+    v: Record<string, string | boolean>,
+  ) => Record<string, string | boolean>;
   examples: string[];
 }
+
+const METRIC_PITCH: Record<string, string> = {
+  "M1.6": "0.35",
+  M2: "0.4",
+  "M2.5": "0.45",
+  M3: "0.5",
+  "M3.5": "0.6",
+  M4: "0.7",
+  M5: "0.8",
+  M6: "1.0",
+  M8: "1.25",
+  M10: "1.5",
+  M12: "1.75",
+  M14: "2.0",
+  M16: "2.0",
+};
+
+const SHCS_HEX: Record<string, string> = {
+  "M1.6": "H1.5",
+  M2: "H1.5",
+  "M2.5": "H2.0",
+  M3: "H2.5",
+  M4: "H3.0",
+  M5: "H4.0",
+  M6: "H5.0",
+  M8: "H6.0",
+  M10: "H8.0",
+  M12: "H10.0",
+};
+
+const BHCS_HEX: Record<string, string> = {
+  M3: "H2.0",
+  M4: "H2.5",
+  M5: "H3.0",
+  M6: "H4.0",
+  M8: "H5.0",
+  M10: "H6.0",
+};
+
+const FHCS_TORX: Record<string, string> = {
+  M3: "T10",
+  M4: "T20",
+  M5: "T25",
+  M6: "T30",
+  M8: "T40",
+};
+
+const MATERIAL_FINISH: Record<string, string> = {
+  "8.8 STL": "ZINC",
+  "10.9 STL": "BLK OX",
+  "12.9 STL": "BLK OX",
+  "1018 STL": "ZINC",
+  "CARBON STL": "ZINC",
+  "18-8 SS": "",
+  "316 SS": "",
+  "A2 SS": "",
+  "A4 SS": "",
+  BRASS: "",
+  NYL: "",
+  TI: "",
+};
+
+const NUT_PITCH: Record<string, string> = METRIC_PITCH;
+
+const METRIC_THREADS = [
+  "M1.6",
+  "M2",
+  "M2.5",
+  "M3",
+  "M3.5",
+  "M4",
+  "M5",
+  "M6",
+  "M8",
+  "M10",
+  "M12",
+  "M14",
+  "M16",
+];
+
+const IMPERIAL_THREADS = [
+  "0-80",
+  "2-56",
+  "4-40",
+  "6-32",
+  "8-32",
+  "10-24",
+  "10-32",
+  "1/4-20",
+  "1/4-28",
+  "5/16-18",
+  "3/8-16",
+  "1/2-13",
+];
+
+const METRIC_LENGTHS = [
+  "3",
+  "4",
+  "5",
+  "6",
+  "8",
+  "10",
+  "12",
+  "14",
+  "16",
+  "18",
+  "20",
+  "25",
+  "30",
+  "35",
+  "40",
+  "45",
+  "50",
+  "55",
+  "60",
+  "70",
+  "80",
+  "100",
+];
+
+const IMPERIAL_LENGTHS = [
+  "1/4",
+  "3/8",
+  "1/2",
+  "5/8",
+  "3/4",
+  "7/8",
+  "1.0",
+  "1.25",
+  "1.5",
+  "1.75",
+  "2.0",
+  "2.5",
+  "3.0",
+];
+
+const COMMON_DIAMETERS_MM = [
+  "3",
+  "4",
+  "5",
+  "6",
+  "8",
+  "10",
+  "12",
+  "15",
+  "16",
+  "20",
+  "22",
+  "25",
+  "28",
+  "30",
+  "32",
+  "35",
+  "40",
+  "50",
+];
 
 const sanitize = (s: string | boolean | undefined) =>
   typeof s === "string" ? s.trim().toUpperCase() : "";
@@ -110,15 +271,8 @@ export const CATEGORIES: Category[] = [
         label: "THREAD",
         type: "text",
         placeholder: "M3  or  1/4-20",
-        width: "third",
-      },
-      {
-        key: "pitch",
-        label: "PITCH",
-        type: "text",
-        placeholder: "0.5",
-        hint: "blank for imperial",
-        optional: true,
+        suggestions: (v) =>
+          v.units === "IMPERIAL" ? IMPERIAL_THREADS : METRIC_THREADS,
         width: "third",
       },
       {
@@ -126,12 +280,25 @@ export const CATEGORIES: Category[] = [
         label: "LENGTH",
         type: "text",
         placeholder: "12  or  1.0",
+        suggestions: (v) =>
+          v.units === "IMPERIAL" ? IMPERIAL_LENGTHS : METRIC_LENGTHS,
+        width: "third",
+      },
+      {
+        key: "pitch",
+        label: "PITCH",
+        type: "text",
+        placeholder: "0.5",
+        hint: "auto-filled from thread",
+        optional: true,
+        advanced: true,
         width: "third",
       },
       {
         key: "threadForming",
         label: "THREAD FORMING (TF)",
         type: "checkbox",
+        advanced: true,
         width: "full",
       },
       {
@@ -140,6 +307,7 @@ export const CATEGORIES: Category[] = [
         type: "select",
         options: DRIVE_OPTIONS,
         defaultValue: "H2.0",
+        advanced: true,
         width: "third",
       },
       {
@@ -148,6 +316,7 @@ export const CATEGORIES: Category[] = [
         type: "select",
         options: MATERIALS,
         defaultValue: "8.8 STL",
+        advanced: true,
         width: "third",
       },
       {
@@ -156,6 +325,7 @@ export const CATEGORIES: Category[] = [
         type: "select",
         options: FINISHES,
         defaultValue: "ZINC",
+        advanced: true,
         width: "third",
       },
     ],
@@ -182,6 +352,26 @@ export const CATEGORIES: Category[] = [
           : [thread, pitch, length].filter(Boolean).join("X");
       }
       return joinParts([head, dims, drive, material, finish]);
+    },
+    derive: (v) => {
+      const out: Record<string, string | boolean> = {};
+      const thread = sanitize(v.thread);
+      const head = typeof v.head === "string" ? v.head : "";
+      const mat = typeof v.material === "string" ? v.material : "";
+      const metric = v.units !== "IMPERIAL";
+      if (metric && thread in METRIC_PITCH) out.pitch = METRIC_PITCH[thread];
+      if (!metric) out.pitch = "";
+      if (head === "SHCS" && thread in SHCS_HEX) out.drive = SHCS_HEX[thread];
+      else if (head === "BHCS" && thread in BHCS_HEX)
+        out.drive = BHCS_HEX[thread];
+      else if (head === "FHCS" && thread in FHCS_TORX)
+        out.drive = FHCS_TORX[thread];
+      else if (head === "PHCS") out.drive = "PH2";
+      else if (head === "HHCS") out.drive = "";
+      else if (head === "SSS" && thread in SHCS_HEX)
+        out.drive = SHCS_HEX[thread];
+      if (mat in MATERIAL_FINISH) out.finish = MATERIAL_FINISH[mat];
+      return out;
     },
     examples: [
       "SHCS, M3X0.5X12, H2.0, 8.8 STL, ZINC",
@@ -210,6 +400,7 @@ export const CATEGORIES: Category[] = [
         label: "THREAD",
         type: "text",
         placeholder: "M4",
+        suggestions: () => METRIC_THREADS.concat(IMPERIAL_THREADS),
         width: "half",
       },
       {
@@ -217,7 +408,9 @@ export const CATEGORIES: Category[] = [
         label: "PITCH",
         type: "text",
         placeholder: "0.7",
+        hint: "auto-filled from thread",
         optional: true,
+        advanced: true,
         width: "half",
       },
       {
@@ -225,6 +418,8 @@ export const CATEGORIES: Category[] = [
         label: "MATERIAL / FINISH",
         type: "text",
         placeholder: "12.9 STL, ZINC",
+        defaultValue: "12.9 STL, ZINC",
+        advanced: true,
         width: "half",
       },
     ],
@@ -235,6 +430,12 @@ export const CATEGORIES: Category[] = [
       const mat = sanitize(v.material);
       const dims = [thread, pitch].filter(Boolean).join("X");
       return joinParts(["NUT", type, dims, mat]);
+    },
+    derive: (v) => {
+      const out: Record<string, string | boolean> = {};
+      const thread = sanitize(v.thread);
+      if (thread in NUT_PITCH) out.pitch = NUT_PITCH[thread];
+      return out;
     },
     examples: ["NUT, NYLOC, M4X0.7, 12.9 STL, ZINC"],
   },
@@ -258,6 +459,7 @@ export const CATEGORIES: Category[] = [
         label: "NOMINAL SIZE",
         type: "text",
         placeholder: "M3 or 1/4IN",
+        suggestions: () => METRIC_THREADS.concat(["1/4IN", "3/8IN", "1/2IN"]),
         width: "third",
       },
       {
@@ -284,33 +486,66 @@ export const CATEGORIES: Category[] = [
     id: "dowel",
     group: "FASTENERS",
     label: "DOWEL / PIN",
-    description: "DOWEL, [NOMINAL SIZE], [MATERIAL/FINISH]",
+    description: "DOWEL, [DIA][UNIT] D X [LEN][UNIT] L, [MATERIAL/FINISH]",
     series: "2XXXXXX (OTS PART)",
     fields: [
       {
-        key: "size",
-        label: "NOMINAL SIZE",
+        key: "units",
+        label: "UNITS",
+        type: "select",
+        options: ["MM", "IN"],
+        defaultValue: "MM",
+        width: "third",
+      },
+      {
+        key: "diameter",
+        label: "DIAMETER",
         type: "text",
-        placeholder: "3MM X 10",
-        width: "half",
+        placeholder: "3",
+        suggestions: () => ["1.5", "2", "2.5", "3", "4", "5", "6", "8", "10"],
+        width: "third",
+      },
+      {
+        key: "length",
+        label: "LENGTH",
+        type: "text",
+        placeholder: "20",
+        suggestions: () => ["6", "8", "10", "12", "16", "20", "25", "30", "40"],
+        width: "third",
       },
       {
         key: "material",
         label: "MATERIAL / FINISH",
         type: "text",
         placeholder: "18-8 SS",
-        width: "half",
+        defaultValue: "18-8 SS",
+        width: "full",
       },
     ],
-    format: (v) =>
-      joinParts(["DOWEL", sanitize(v.size), sanitize(v.material)]),
-    examples: ["DOWEL, 3 D X 20 L, 18-8 SS"],
+    format: (v) => {
+      const unit = sanitize(v.units) || "MM";
+      const d = sanitize(v.diameter);
+      const l = sanitize(v.length);
+      const dims =
+        d && l
+          ? `${d}${unit} D X ${l}${unit} L`
+          : d
+            ? `${d}${unit} D`
+            : l
+              ? `${l}${unit} L`
+              : "";
+      return joinParts(["DOWEL", dims, sanitize(v.material)]);
+    },
+    examples: [
+      "DOWEL, 3MM D X 20MM L, 18-8 SS",
+      "DOWEL, 0.25IN D X 1.0IN L, 18-8 SS",
+    ],
   },
   {
     id: "bearing",
     group: "BEARINGS",
     label: "BEARING",
-    description: "BEARING, [TYPE], [OD]X[ID]X[WIDTH], [SEALS], [MATERIAL]",
+    description: "BEARING, [TYPE], [OD]X[ID]X[WIDTH][UNIT], [SEALS], [MATERIAL]",
     series: "2XXXXXX (OTS PART)",
     fields: [
       {
@@ -322,11 +557,11 @@ export const CATEGORIES: Category[] = [
         width: "half",
       },
       {
-        key: "seals",
-        label: "SEALS / SHIELDS",
+        key: "units",
+        label: "UNITS",
         type: "select",
-        options: ["", "2RS", "2Z", "OPEN", "1RS", "1Z"],
-        defaultValue: "2RS",
+        options: ["MM", "IN"],
+        defaultValue: "MM",
         width: "half",
       },
       {
@@ -334,6 +569,7 @@ export const CATEGORIES: Category[] = [
         label: "OD",
         type: "text",
         placeholder: "22",
+        suggestions: () => COMMON_DIAMETERS_MM,
         width: "third",
       },
       {
@@ -341,6 +577,7 @@ export const CATEGORIES: Category[] = [
         label: "ID",
         type: "text",
         placeholder: "8",
+        suggestions: () => COMMON_DIAMETERS_MM,
         width: "third",
       },
       {
@@ -348,22 +585,36 @@ export const CATEGORIES: Category[] = [
         label: "WIDTH",
         type: "text",
         placeholder: "7",
+        suggestions: () => ["2", "3", "4", "5", "6", "7", "8", "10", "12", "15"],
         width: "third",
+      },
+      {
+        key: "seals",
+        label: "SEALS / SHIELDS",
+        type: "select",
+        options: ["", "2RS", "2Z", "OPEN", "1RS", "1Z"],
+        defaultValue: "2RS",
+        advanced: true,
+        width: "half",
       },
       {
         key: "material",
         label: "MATERIAL",
         type: "text",
         placeholder: "52100 STL",
+        defaultValue: "52100 STL",
         optional: true,
-        width: "full",
+        advanced: true,
+        width: "half",
       },
     ],
     format: (v) => {
       const od = sanitize(v.od);
       const id = sanitize(v.id);
       const w = sanitize(v.width);
-      const dims = [od, id, w].filter(Boolean).join("X");
+      const unit = sanitize(v.units) || "MM";
+      const core = [od, id, w].filter(Boolean).join("X");
+      const dims = core ? `${core}${unit}` : "";
       return joinParts([
         "BEARING",
         sanitize(v.type),
@@ -372,13 +623,16 @@ export const CATEGORIES: Category[] = [
         sanitize(v.material),
       ]);
     },
-    examples: ["BEARING, BALL, 22X8X7, 2RS, 52100 STL"],
+    examples: [
+      "BEARING, BALL, 22X8X7MM, 2RS, 52100 STL",
+      "BEARING, BALL, 0.5X0.25X0.19IN, 2RS, 52100 STL",
+    ],
   },
   {
     id: "bushing",
     group: "BEARINGS",
     label: "BUSHING",
-    description: "BUSHING, [TYPE], [OD] X [ID] X [WIDTH]",
+    description: "BUSHING, [TYPE], [OD] X [ID] X [WIDTH] [UNIT]",
     series: "2XXXXXX (OTS PART)",
     fields: [
       {
@@ -387,27 +641,35 @@ export const CATEGORIES: Category[] = [
         type: "select",
         options: ["FLANGED", "SLEEVE", "THRUST"],
         defaultValue: "FLANGED",
-        width: "full",
+        width: "half",
+      },
+      {
+        key: "units",
+        label: "UNITS",
+        type: "select",
+        options: ["MM", "IN"],
+        defaultValue: "IN",
+        width: "half",
       },
       {
         key: "od",
         label: "OD",
         type: "text",
-        placeholder: "0.375IN",
+        placeholder: "0.375",
         width: "third",
       },
       {
         key: "id",
         label: "ID",
         type: "text",
-        placeholder: "0.25IN",
+        placeholder: "0.25",
         width: "third",
       },
       {
         key: "width",
         label: "WIDTH",
         type: "text",
-        placeholder: "0.5IN",
+        placeholder: "0.5",
         width: "third",
       },
     ],
@@ -415,10 +677,14 @@ export const CATEGORIES: Category[] = [
       const parts = [sanitize(v.od), sanitize(v.id), sanitize(v.width)].filter(
         Boolean,
       );
-      const dims = parts.join(" X ");
+      const unit = sanitize(v.units) || "IN";
+      const dims = parts.length ? `${parts.join(" X ")} ${unit}` : "";
       return joinParts(["BUSHING", sanitize(v.type), dims]);
     },
-    examples: ["BUSHING, FLANGED, 0.25IN X 0.375IN X 0.5IN"],
+    examples: [
+      "BUSHING, FLANGED, 0.25 X 0.375 X 0.5 IN",
+      "BUSHING, SLEEVE, 6 X 8 X 10 MM",
+    ],
   },
   {
     id: "raw",
@@ -450,6 +716,7 @@ export const CATEGORIES: Category[] = [
         type: "text",
         placeholder: "ROUND / SQUARE / T-SLOT / 2020",
         optional: true,
+        advanced: true,
         width: "half",
       },
       {
@@ -472,6 +739,7 @@ export const CATEGORIES: Category[] = [
         type: "text",
         placeholder: "CLEAR ANOD",
         optional: true,
+        advanced: true,
         width: "half",
       },
     ],
@@ -527,6 +795,7 @@ export const CATEGORIES: Category[] = [
         type: "text",
         placeholder: "PROXIMITY, INDUCTIVE, PNP",
         optional: true,
+        advanced: true,
         width: "half",
       },
       {
@@ -535,6 +804,7 @@ export const CATEGORIES: Category[] = [
         type: "text",
         placeholder: "40 D X 20 T, 12.36CFM, 12VDC",
         optional: true,
+        advanced: true,
         width: "full",
       },
       {
@@ -580,6 +850,7 @@ export const CATEGORIES: Category[] = [
         type: "text",
         placeholder: "COMPRESSION",
         optional: true,
+        advanced: true,
         width: "half",
       },
       {
@@ -595,6 +866,7 @@ export const CATEGORIES: Category[] = [
         type: "text",
         placeholder: "316 SS",
         optional: true,
+        advanced: true,
         width: "full",
       },
     ],
@@ -621,6 +893,7 @@ export const CATEGORIES: Category[] = [
         key: "isAssembly",
         label: "IS ASSEMBLY (ADD 'ASSEM' PREFIX)",
         type: "checkbox",
+        advanced: true,
         width: "full",
       },
       {
@@ -630,6 +903,7 @@ export const CATEGORIES: Category[] = [
         placeholder: "T6 2.0   (optional — skip if reusable)",
         hint: "use name from go/name",
         optional: true,
+        advanced: true,
         width: "half",
       },
       {
@@ -653,6 +927,7 @@ export const CATEGORIES: Category[] = [
         options: ["", "L", "R"],
         defaultValue: "",
         optional: true,
+        advanced: true,
         width: "third",
       },
     ],
